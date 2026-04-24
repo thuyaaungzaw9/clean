@@ -45,7 +45,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📂 /combo (10MB split)", callback_data="help_combo")],
         [InlineKeyboardButton("🧹 /cardclean (extract cards)", callback_data="help_cardclean")],
         [InlineKeyboardButton("✂️ /cn (custom split cards)", callback_data="help_cn")],
-        [InlineKeyboardButton("🧽 /cleancombo (remove ads from combo)", callback_data="help_cleancombo")],
+        [InlineKeyboardButton("🧽 /cleancombo (remove ads)", callback_data="help_cleancombo")],
         [InlineKeyboardButton("👑 Admin Panel", callback_data="admin_panel")] if user_id == ADMIN_ID else []
     ]
     reply_markup = InlineKeyboardMarkup([k for k in keyboard if k])
@@ -58,15 +58,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     text = """
 📌 Commands:
-/combo [filename] – 10MB split (reply to file also works)
-/cardclean – extract credit cards from dump
-/cn [number] – split cards file by custom number
-/cleancombo – remove ads/spam from email:pass combo files
-/admin – admin panel (user add/remove)
+/combo – 10MB split (reply to file also works)
+/cardclean – extract cards (supports card|mm|yy|cvv)
+/cn [number] – split cards by custom number
+/cleancombo – remove ads from email:pass combos
+/admin – admin panel
 """
     await update.message.reply_text(text)
 
-# combo split (same as before, keep it)
+# combo split
 async def combo_split(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_user(user_id):
@@ -107,7 +107,7 @@ async def cardclean_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ No permission")
         return
     context.user_data["mode"] = "cardclean"
-    await update.message.reply_text("📤 Card dump (.txt) ဖိုင်ကို upload လုပ်ပါ (or reply)")
+    await update.message.reply_text("📤 Card dump (.txt) ဖိုင်ကို **upload** လုပ်ပါ (or reply to a file)")
 
 async def cn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -127,35 +127,70 @@ async def clean_combo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("⛔ No permission")
         return
     context.user_data["mode"] = "clean_combo"
-    await update.message.reply_text("🧹 Combo file (.txt) ကို upload လုပ်ပါ (or reply)\n\n→ Ads, @usernames, http links တွေ ဖယ်ရှားပြီး **email:pass** သီးသန့်ထုတ်ပေးမယ်")
+    await update.message.reply_text("🧹 Combo file (.txt) ကို upload လုပ်ပါ (or reply)\n\n→ Ads, @usernames, http links တွေ ဖယ်ရှားပြီး email:pass သီးသန့်ထုတ်ပေးမယ်")
+
+# Extract CC with | or : format
+def extract_cards_from_text(content):
+    patterns = [
+        r'\b(\d{13,19})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})\b',  # card|mm|yy|cvv
+        r'\b(\d{13,19})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\b',                     # card|mm|yy
+        r'\b(\d{13,19})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})\b',  # card:mm:yy:cvv
+    ]
+    cards = []
+    for pattern in patterns:
+        matches = re.findall(pattern, content, re.IGNORECASE)
+        for match in matches:
+            if len(match) == 4:
+                cards.append(f"{match[0]}|{match[1]}|{match[2]}|{match[3]}")
+            elif len(match) == 3:
+                cards.append(f"{match[0]}|{match[1]}|{match[2]}")
+    # remove duplicates
+    return list(dict.fromkeys(cards))
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_user(user_id):
         return
-    doc = update.message.document
+
+    # Check if user is replying to a file
+    replied_file = None
+    if update.message.reply_to_message and update.message.reply_to_message.document:
+        replied_file = update.message.reply_to_message.document
+        doc = replied_file
+    elif update.message.document:
+        doc = update.message.document
+    else:
+        await update.message.reply_text("❌ .txt ဖိုင်တစ်ခု upload လုပ်ပါ (or reply to a file)")
+        return
+
     if not doc.file_name.endswith(".txt"):
         await update.message.reply_text("❌ .txt ဖိုင်သာ လက်ခံပါတယ်။")
         return
+
+    # Download file
     file = await doc.get_file()
     file_path = f"temp_{user_id}.txt"
     await file.download_to_drive(file_path)
+
     mode = context.user_data.get("mode")
+
     if mode == "cardclean":
-        card_pattern = r'\b(?:\d[ -]*?){13,16}\b'
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
-        cards = re.findall(card_pattern, content)
-        cards = list(set([c.replace(" ", "").replace("-", "") for c in cards if len(c.replace(" ", "").replace("-", "")) >= 13]))
+        cards = extract_cards_from_text(content)
         if not cards:
-            await update.message.reply_text("⚠️ ဘာ Card မှ မတွေ့ပါ။")
+            await update.message.reply_text("⚠️ ဘာ Card မှ မတွေ့ပါ။\n\nFormat: 4111111111111111|12|25|123 or 4111111111111111|12|25")
         else:
             out_file = f"cleaned_{user_id}.txt"
-            with open(out_file, 'w') as f:
+            with open(out_file, 'w', encoding='utf-8') as f:
                 f.write("\n".join(cards))
-            await update.message.reply_document(document=open(out_file, 'rb'), filename="cleaned_cards.txt")
+            await update.message.reply_document(
+                document=open(out_file, 'rb'),
+                filename="cleaned_cards.txt"
+            )
             os.remove(out_file)
         context.user_data["mode"] = None
+
     elif mode == "cn_split":
         number = context.user_data.get("cn_number", 100)
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -170,11 +205,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for i in range(0, total, number):
                 batch = lines[i:i+number]
                 out_path = os.path.join(out_dir, f"cards_part_{part}.txt")
-                with open(out_path, 'w') as f:
+                with open(out_path, 'w', encoding='utf-8') as f:
                     f.write("\n".join(batch))
                 part += 1
             await update.message.reply_text(f"✅ {total} cards → {part-1} files in {out_dir}/")
         context.user_data["mode"] = None
+
     elif mode == "clean_combo":
         cleaned = []
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -199,8 +235,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_document(document=open(out_file, 'rb'), filename="cleaned_combo.txt")
             os.remove(out_file)
         context.user_data["mode"] = None
+
     else:
-        await update.message.reply_text("⚠️ /cardclean , /cn , or /cleancombo command အရင်ခေါ်ပါ။")
+        await update.message.reply_text("⚠️ /cardclean , /cn , or /cleancombo command အရင်ခေါ်ပါ။\n\n(Command ခေါ်ပြီးမှ file upload လုပ်ပါ)")
+
     os.remove(file_path)
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
