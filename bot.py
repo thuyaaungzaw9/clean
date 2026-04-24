@@ -18,8 +18,20 @@ TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 USER_FILE = "users.json"
+BOT_OWNER = "@thuyaaungzaw"
 BRAND = "✨ <b>Developer by ThuYa</b> ✨"
 DIVIDER = "━━━━━━━━━━━━━━━━━━"
+
+def unauthorized_text(user_id: int) -> str:
+    return (
+        "⛔️ <b>Unauthorized Access</b>\n"
+        f"{DIVIDER}\n"
+        f"🆔 Your ID: <code>{user_id}</code>\n\n"
+        f"📩 Bot ကိုသုံးချင်ရင် Owner ကို ဆက်သွယ်ပါ:\n"
+        f"👤 <b>Bot Owner:</b> {BOT_OWNER}\n"
+        f"{DIVIDER}\n"
+        f"{BRAND}"
+    )
 
 # ───────────────────────── User store ─────────────────────────
 def load_users():
@@ -146,7 +158,7 @@ HELP_TEXTS = {
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_user(user_id):
-        await update.message.reply_text("⛔ သင့်အတွက် ခွင့်မပြုပါ။")
+        await update.message.reply_text(unauthorized_text(user_id), parse_mode=ParseMode.HTML)
         return
     await update.message.reply_text(
         WELCOME_TEXT,
@@ -157,7 +169,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_user(user_id):
-        await update.message.reply_text("⛔ No permission")
+        await update.message.reply_text(unauthorized_text(user_id), parse_mode=ParseMode.HTML)
         return
     await update.message.reply_text(
         HELP_TEXTS["help_all"] + f"\n{DIVIDER}\n{BRAND}",
@@ -229,7 +241,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def combo_split(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_user(user_id):
-        await update.message.reply_text("⛔ No permission")
+        await update.message.reply_text(unauthorized_text(user_id), parse_mode=ParseMode.HTML)
         return
     filename = "gmail.txt"
     if context.args:
@@ -277,7 +289,7 @@ async def combo_split(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cardclean_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_user(user_id):
-        await update.message.reply_text("⛔ No permission")
+        await update.message.reply_text(unauthorized_text(user_id), parse_mode=ParseMode.HTML)
         return
     # If replied to a file, process directly
     if update.message.reply_to_message and update.message.reply_to_message.document:
@@ -297,7 +309,7 @@ async def cardclean_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_user(user_id):
-        await update.message.reply_text("⛔ No permission")
+        await update.message.reply_text(unauthorized_text(user_id), parse_mode=ParseMode.HTML)
         return
     number = 100
     if context.args and context.args[0].isdigit():
@@ -320,7 +332,7 @@ async def cn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def clean_combo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_user(user_id):
-        await update.message.reply_text("⛔ No permission")
+        await update.message.reply_text(unauthorized_text(user_id), parse_mode=ParseMode.HTML)
         return
     context.user_data["mode"] = "clean_combo"
     if update.message.reply_to_message and update.message.reply_to_message.document:
