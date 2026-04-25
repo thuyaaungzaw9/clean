@@ -238,36 +238,14 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
 # ───────────────────────── Combo split ─────────────────────────
-async def combo_split(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_user(user_id):
-        await update.message.reply_text(unauthorized_text(user_id), parse_mode=ParseMode.HTML)
-        return
-    filename = "gmail.txt"
-    if context.args:
-        filename = context.args[0]
-    reply = update.message.reply_to_message
-    if reply and reply.document and reply.document.file_name.endswith(".txt"):
-        file = await reply.document.get_file()
-        filename = f"temp_combo_{user_id}.txt"
-        await file.download_to_drive(filename)
-        await update.message.reply_text(
-            f"📥 <b>Downloaded:</b> <code>{reply.document.file_name}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-    elif not os.path.exists(filename):
-        await update.message.reply_text(
-            f"❌ <code>{filename}</code> မတွေ့ပါ။\n\n"
-            "💡 <b>အကြံပြုချက်:</b> ဖိုင်ကို <b>Reply</b> ထောက်ပြီး\n"
-            "<code>/combo</code> ရိုက်ပါ။",
-            parse_mode=ParseMode.HTML,
-        )
-        return
+async def _do_combo_split(update: Update, file_path: str, user_id: int):
+    """Split a .txt file into 10MB chunks and send each back via Telegram."""
     chunk_size = 10 * 1024 * 1024
-    out_dir = "split_files"
+    out_dir = f"split_files_{user_id}"
     os.makedirs(out_dir, exist_ok=True)
+    parts = []
     file_number = 1
-    with open(filename, "rb") as f:
+    with open(file_path, "rb") as f:
         while True:
             chunk = f.read(chunk_size)
             if not chunk:
@@ -275,15 +253,80 @@ async def combo_split(update: Update, context: ContextTypes.DEFAULT_TYPE):
             out_path = os.path.join(out_dir, f"part_{file_number}.txt")
             with open(out_path, "wb") as cf:
                 cf.write(chunk)
+            parts.append(out_path)
             file_number += 1
+
+    if not parts:
+        await update.message.reply_text("⚠️ ဖိုင်ထဲမှာ ဘာမှမပါပါ။")
+        return
+
     await update.message.reply_text(
         f"✅ <b>Split Complete!</b>\n{DIVIDER}\n"
-        f"📁 Folder: <code>{out_dir}/</code>\n"
-        f"📊 Total files: <b>{file_number-1}</b>",
+        f"📊 Total parts: <b>{len(parts)}</b>\n"
+        f"📤 Uploading...",
         parse_mode=ParseMode.HTML,
     )
-    if filename.startswith("temp_combo"):
-        os.remove(filename)
+    for idx, p in enumerate(parts, 1):
+        with open(p, "rb") as fh:
+            await update.message.reply_document(
+                document=fh,
+                filename=f"part_{idx}.txt",
+                caption=f"📂 Part <b>{idx}/{len(parts)}</b>\n{BRAND}",
+                parse_mode=ParseMode.HTML,
+            )
+        os.remove(p)
+    try:
+        os.rmdir(out_dir)
+    except OSError:
+        pass
+
+
+async def combo_split(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_user(user_id):
+        await update.message.reply_text(unauthorized_text(user_id), parse_mode=ParseMode.HTML)
+        return
+
+    # Case 1: replied to a .txt document → process immediately
+    reply = update.message.reply_to_message
+    if reply and reply.document and reply.document.file_name.endswith(".txt"):
+        file = await reply.document.get_file()
+        tmp_path = f"temp_combo_{user_id}.txt"
+        await file.download_to_drive(tmp_path)
+        await update.message.reply_text(
+            f"📥 <b>Downloaded:</b> <code>{reply.document.file_name}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        try:
+            await _do_combo_split(update, tmp_path, user_id)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        return
+
+    # Case 2: explicit filename argument that exists on the server
+    if context.args:
+        filename = context.args[0]
+        if os.path.exists(filename):
+            await _do_combo_split(update, filename, user_id)
+            return
+        await update.message.reply_text(
+            f"❌ <code>{filename}</code> မတွေ့ပါ။",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Case 3: no reply, no args → enter combo_split mode and wait for upload
+    context.user_data["mode"] = "combo_split"
+    await update.message.reply_text(
+        "📂 <b>Combo Split Mode</b>\n"
+        f"{DIVIDER}\n"
+        "📤 Combo <code>.txt</code> ဖိုင်ကို upload လုပ်ပါ။\n"
+        "Bot က <b>10MB</b> အစိတ်စိတ်အပိုင်းပိုင်း ခွဲပြီး ပြန်ပို့ပေးပါမယ်။\n\n"
+        "<i>💡 Tip: ဖိုင်ကို <b>Reply</b> ထောက်ပြီး\n"
+        "<code>/combo</code> ရိုက်လည်း ရပါတယ်။</i>",
+        parse_mode=ParseMode.HTML,
+    )
 
 # ───────────────────────── Mode entry commands ─────────────────────────
 async def cardclean_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -485,11 +528,15 @@ async def handle_document(
             os.remove(out_file)
         context.user_data["mode"] = None
 
+    elif mode == "combo_split":
+        await _do_combo_split(update, file_path, user_id)
+        context.user_data["mode"] = None
+
     else:
         await update.message.reply_text(
             "⚠️ <b>Command အရင်ရွေးပါ</b>\n"
             f"{DIVIDER}\n"
-            "<code>/cardclean</code> • <code>/cn</code> • <code>/cleancombo</code>\n\n"
+            "<code>/combo</code> • <code>/cardclean</code> • <code>/cn</code> • <code>/cleancombo</code>\n\n"
             "💡 <i>Tip: ဖိုင်ကို <b>Reply</b> ထောက်ပြီး\n"
             "command ရိုက်တာက ပိုမြန်ပါတယ်!</i>",
             parse_mode=ParseMode.HTML,
